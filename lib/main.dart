@@ -141,28 +141,53 @@ class _DinoGameScreenState extends State<DinoGameScreen>
     final bgColor = game.showNightMode
         ? const Color(0xFF303030)
         : const Color(0xFFF7F7F7);
+    final iconColor = game.showNightMode
+        ? const Color(0xFF9E9E9E)
+        : const Color(0xFFBDBDBD);
     return Scaffold(
       backgroundColor: bgColor,
       body: KeyboardListener(
         focusNode: _focusNode,
         autofocus: true,
         onKeyEvent: _onKeyEvent,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onPanDown: _onPanDown,
-          onPanUpdate: _onPanUpdate,
-          onPanEnd: _onPanEnd,
-          onPanCancel: _onPanCancel,
-          child: SizedBox.expand(
-            child: CustomPaint(
-              painter: DinoGamePainter(
-                game: game,
-                repaint: _repaintNotifier,
+        child: Stack(
+          children: [
+            // Game canvas
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onPanDown: _onPanDown,
+              onPanUpdate: _onPanUpdate,
+              onPanEnd: _onPanEnd,
+              onPanCancel: _onPanCancel,
+              child: SizedBox.expand(
+                child: CustomPaint(
+                  painter: DinoGamePainter(
+                    game: game,
+                    repaint: _repaintNotifier,
+                  ),
+                ),
               ),
             ),
-          ),
+            // Info button (top-left corner)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 8,
+              left: 8,
+              child: IconButton(
+                icon: Icon(Icons.info_outline, color: iconColor, size: 20),
+                tooltip: 'About & Licenses',
+                onPressed: () => _showAboutDialog(context),
+              ),
+            ),
+          ],
         ),
       ),
+    );
+  }
+
+  void _showAboutDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AboutDialog(),
     );
   }
 }
@@ -209,4 +234,130 @@ class DinoGamePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant DinoGamePainter oldDelegate) => true;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  ABOUT / LICENSE DIALOG
+// ══════════════════════════════════════════════════════════════════════════
+
+class AboutDialog extends StatelessWidget {
+  const AboutDialog({super.key});
+
+  static const String _chromiumLicense = '''
+Copyright 2015 The Chromium Authors
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+  * Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+  * Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+  * Neither the name of Google LLC nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.''';
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480, maxHeight: 600),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              Row(
+                children: [
+                  const Icon(Icons.videogame_asset, size: 28),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'Offline Dino',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              const Text(
+                'A faithful recreation of Chrome\'s offline dinosaur game, '
+                'built in Dart/Flutter.',
+                style: TextStyle(fontSize: 14, color: Colors.black87),
+              ),
+              const SizedBox(height: 20),
+
+              // Licenses section
+              const Text(
+                'Third-Party Licenses',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+
+              const Text(
+                'Chromium T-Rex Runner Assets',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Sprite sheets and sound effects are from the Chromium '
+                'project, licensed under the BSD 3-Clause License.',
+                style: TextStyle(fontSize: 12, color: Colors.black54),
+              ),
+              const SizedBox(height: 8),
+
+              // Scrollable license text
+              Flexible(
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey[300]!),
+                  ),
+                  child: const SingleChildScrollView(
+                    child: Text(
+                      _chromiumLicense,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontFamily: 'monospace',
+                        color: Colors.black87,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Close button
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Close'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
