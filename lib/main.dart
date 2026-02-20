@@ -1,8 +1,18 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
 
 import 'game/game.dart';
+
+/// Whether the current platform is a mobile device (phone/tablet).
+bool get _isMobilePlatform {
+  if (kIsWeb) return false; // Web could be either; assume desktop-like.
+  return defaultTargetPlatform == TargetPlatform.iOS ||
+      defaultTargetPlatform == TargetPlatform.android;
+}
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,6 +43,7 @@ class _DinoGameScreenState extends State<DinoGameScreen>
   double _panStartY = 0;
   bool _isDucking = false;
   bool _jumpedThisGesture = false;
+  Timer? _jumpTimer;
 
   @override
   void initState() {
@@ -84,27 +95,69 @@ class _DinoGameScreenState extends State<DinoGameScreen>
   // recognisers. This avoids the gesture-arena conflict where Flutter has
   // to decide which recogniser wins, causing lag or missed inputs.
   //
-  // • Touch-down → jump (immediately).
-  // • Drag downward > 20px → switch to ducking (cancels the jump intent).
-  // • Lift finger → end duck / end jump.
+  // • Touch-down → start a short timer before jumping, giving the user a
+  //   window to swipe down for ducking instead.
+  // • If the finger lifts (quick tap) before the timer fires → jump
+  //   immediately.  This is the key difference from the old code which
+  //   swallowed short taps entirely.
+  // • Drag downward > 20px (before jump fires) → cancel jump, duck.
+  // • Lift finger → end duck / end jump (variable-height jump).
+
+  /// How long to wait after touch-down before committing to a jump.
+  static const Duration _jumpDelay = Duration(milliseconds: 80);
+
+  void _fireJump() {
+    _jumpTimer?.cancel();
+    if (!_jumpedThisGesture && !_isDucking) {
+      _jumpedThisGesture = true;
+      game.onAction();
+    }
+  }
 
   void _onPanDown(DragDownDetails details) {
     _panStartY = details.globalPosition.dy;
     _isDucking = false;
-    _jumpedThisGesture = true;
-    game.onAction(); // jump immediately on touch
+    _jumpedThisGesture = false;
+
+    // If the game is paused, resume on this touch and consume the gesture
+    // so it doesn't also trigger a jump.
+    if (game.gameState == GameState.paused) {
+      game.resume();
+      // Mark as jumped so the rest of this gesture is ignored.
+      _jumpedThisGesture = true;
+      return;
+    }
+
+    // Defer the jump so a quick swipe-down can override it.
+    _jumpTimer?.cancel();
+    _jumpTimer = Timer(_jumpDelay, _fireJump);
   }
 
   void _onPanUpdate(DragUpdateDetails details) {
     final dy = details.globalPosition.dy - _panStartY;
     if (dy > 20 && !_isDucking) {
-      _isDucking = true;
-      _jumpedThisGesture = false;
-      game.onDuck(true);
+      // If the jump hasn't fired yet, cancel it and duck instead.
+      if (!_jumpedThisGesture) {
+        _jumpTimer?.cancel();
+        _isDucking = true;
+        game.onDuck(true);
+      } else {
+        // Already jumped — trigger duck (speed-drop if airborne, or
+        // immediate duck if on the ground).  The T-Rex internally queues
+        // the duck so it activates on landing if still held.
+        _isDucking = true;
+        game.onDuck(true);
+      }
     }
   }
 
   void _onPanEnd(DragEndDetails details) {
+    // If the timer is still pending (quick tap lifted before 80ms),
+    // fire the jump immediately instead of swallowing it.
+    if (!_jumpedThisGesture && !_isDucking) {
+      _fireJump();
+    }
+    _jumpTimer?.cancel();
     if (_isDucking) {
       _isDucking = false;
       game.onDuck(false);
@@ -116,6 +169,9 @@ class _DinoGameScreenState extends State<DinoGameScreen>
   }
 
   void _onPanCancel() {
+    // When a pan is cancelled (e.g. the info button captured the touch),
+    // just clean up — do NOT fire a jump.
+    _jumpTimer?.cancel();
     if (_isDucking) {
       _isDucking = false;
       game.onDuck(false);
@@ -128,6 +184,7 @@ class _DinoGameScreenState extends State<DinoGameScreen>
 
   @override
   void dispose() {
+    _jumpTimer?.cancel();
     _ticker.dispose();
     _focusNode.dispose();
     _repaintNotifier.dispose();
@@ -150,41 +207,46 @@ class _DinoGameScreenState extends State<DinoGameScreen>
         focusNode: _focusNode,
         autofocus: true,
         onKeyEvent: _onKeyEvent,
-        child: Stack(
-          children: [
-            // Game canvas
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onPanDown: _onPanDown,
-              onPanUpdate: _onPanUpdate,
-              onPanEnd: _onPanEnd,
-              onPanCancel: _onPanCancel,
-              child: SizedBox.expand(
+        child: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onPanDown: _onPanDown,
+          onPanUpdate: _onPanUpdate,
+          onPanEnd: _onPanEnd,
+          onPanCancel: _onPanCancel,
+          child: Stack(
+            children: [
+              // Game canvas
+              SizedBox.expand(
                 child: CustomPaint(
                   painter: DinoGamePainter(
                     game: game,
+                    isMobile: _isMobilePlatform,
                     repaint: _repaintNotifier,
                   ),
                 ),
               ),
-            ),
-            // Info button (top-left corner)
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 8,
-              left: 8,
-              child: IconButton(
-                icon: Icon(Icons.info_outline, color: iconColor, size: 20),
-                tooltip: 'About & Licenses',
-                onPressed: () => _showAboutDialog(context),
+              // Info button (top-left corner)
+              Positioned(
+                top: MediaQuery.of(context).padding.top + 8,
+                left: 8,
+                child: IconButton(
+                  icon: Icon(Icons.info_outline, color: iconColor, size: 20),
+                  tooltip: 'About & Licenses',
+                  onPressed: () => _showAboutDialog(context),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
   void _showAboutDialog(BuildContext context) {
+    // Cancel any pending jump from the pan gesture that overlaps the button.
+    _jumpTimer?.cancel();
+    _jumpedThisGesture = false;
+    game.pause();
     showDialog(
       context: context,
       builder: (context) => AboutDialog(),
@@ -200,9 +262,11 @@ class _GameRepaintNotifier extends ChangeNotifier {
 
 class DinoGamePainter extends CustomPainter {
   final DinoGame game;
+  final bool isMobile;
 
   DinoGamePainter({
     required this.game,
+    required this.isMobile,
     required Listenable repaint,
   }) : super(repaint: repaint);
 
@@ -228,7 +292,8 @@ class DinoGamePainter extends CustomPainter {
     canvas.save();
     canvas.translate(0, offsetY);
     canvas.scale(scale);
-    game.draw(canvas, const Size(_logicalWidth, _logicalHeight));
+    game.draw(canvas, const Size(_logicalWidth, _logicalHeight),
+        isMobile: isMobile);
     canvas.restore();
   }
 

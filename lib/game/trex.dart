@@ -37,6 +37,10 @@ class TRex {
   bool speedDrop = false;
   int jumpCount = 0;
 
+  /// When true, the T-Rex will duck as soon as it lands from a jump.
+  /// Set by touch input when a downward swipe is detected mid-air.
+  bool duckQueued = false;
+
   // ── Blink animation (waiting state) ────────────────────────────────────
   static const int _maxBlinkCount = 3;
   int _blinkCount = 0;
@@ -156,7 +160,15 @@ class TRex {
       jumping = false;
       reachedMinHeight = false;
       speedDrop = false;
-      status = TRexStatus.running;
+
+      // If a duck was requested while airborne, duck immediately on landing.
+      if (duckQueued) {
+        duckQueued = false;
+        ducking = true;
+        status = TRexStatus.ducking;
+      } else {
+        status = TRexStatus.running;
+      }
     }
   }
 
@@ -210,9 +222,16 @@ class TRex {
     if (status == TRexStatus.crashed) return;
 
     if (isDucking && status == TRexStatus.jumping) {
-      // Pressing down while jumping triggers speed-drop.
+      // Pressing down while jumping triggers speed-drop and queues ducking
+      // so the dino ducks immediately on landing if still held.
       setSpeedDrop();
+      duckQueued = true;
       return;
+    }
+
+    // Clear the queued duck when the input is released (even mid-air).
+    if (!isDucking) {
+      duckQueued = false;
     }
 
     if (isDucking && status != TRexStatus.jumping) {
@@ -239,6 +258,7 @@ class TRex {
     reachedMinHeight = false;
     speedDrop = false;
     jumpCount = 0;
+    duckQueued = false;
     status = TRexStatus.waiting;
     playingIntro = false;
 

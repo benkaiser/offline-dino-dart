@@ -1,4 +1,5 @@
 import 'package:flutter/painting.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'constants.dart';
 import 'trex.dart';
@@ -11,6 +12,7 @@ import 'sprites.dart';
 enum GameState {
   waiting,
   playing,
+  paused,
   crashed,
 }
 
@@ -78,6 +80,27 @@ class DinoGame {
   Future<void> init() async {
     await sprites.load();
     await sounds.init();
+    await _loadHighScore();
+  }
+
+  static const String _highScoreKey = 'dino_high_score';
+
+  Future<void> _loadHighScore() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      highScore = prefs.getInt(_highScoreKey) ?? 0;
+    } catch (_) {
+      // If prefs fail, just start with 0.
+    }
+  }
+
+  Future<void> _saveHighScore() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_highScoreKey, highScore);
+    } catch (_) {
+      // Best-effort save.
+    }
   }
 
   // ──────────────────────────────────────────────────────────────────────
@@ -94,6 +117,10 @@ class DinoGame {
 
       case GameState.playing:
         _updatePlaying(deltaTime);
+        break;
+
+      case GameState.paused:
+        // Frozen — no updates.
         break;
 
       case GameState.crashed:
@@ -273,6 +300,7 @@ class DinoGame {
     final int currentScore = score;
     if (currentScore > highScore) {
       highScore = currentScore;
+      _saveHighScore();
     }
 
     gameOverTimer = 0;
@@ -302,6 +330,20 @@ class DinoGame {
     tRex.status = TRexStatus.running;
   }
 
+  /// Pause the game (only while playing).
+  void pause() {
+    if (gameState == GameState.playing) {
+      gameState = GameState.paused;
+    }
+  }
+
+  /// Resume from a paused state.
+  void resume() {
+    if (gameState == GameState.paused) {
+      gameState = GameState.playing;
+    }
+  }
+
   // ──────────────────────────────────────────────────────────────────────
   //  INPUT HANDLERS
   // ──────────────────────────────────────────────────────────────────────
@@ -319,6 +361,9 @@ class DinoGame {
           sounds.playJump();
         }
         tRex.startJump(currentSpeed);
+        break;
+      case GameState.paused:
+        resume();
         break;
       case GameState.crashed:
         restart();
@@ -341,7 +386,9 @@ class DinoGame {
   // ──────────────────────────────────────────────────────────────────────
 
   /// Renders the entire game scene to [canvas] at the given [size].
-  void draw(Canvas canvas, Size size) {
+  ///
+  /// [isMobile] controls whether hint text mentions keyboard keys.
+  void draw(Canvas canvas, Size size, {bool isMobile = false}) {
     // ── If sprites aren't loaded yet, just draw a gray background ────────
     if (!sprites.isLoaded) {
       canvas.drawRect(
@@ -370,7 +417,12 @@ class DinoGame {
 
     // ── Waiting state hint ────────────────────────────────────────────────
     if (gameState == GameState.waiting) {
-      _drawStartHint(canvas, size);
+      _drawStartHint(canvas, size, isMobile: isMobile);
+    }
+
+    // ── Paused overlay ───────────────────────────────────────────────────
+    if (gameState == GameState.paused) {
+      _drawPaused(canvas, size, isMobile: isMobile);
     }
 
     // ── Game-over overlay ────────────────────────────────────────────────
@@ -431,10 +483,12 @@ class DinoGame {
     }
   }
 
-  void _drawStartHint(Canvas canvas, Size size) {
+  void _drawStartHint(Canvas canvas, Size size, {bool isMobile = false}) {
+    final String hintText =
+        isMobile ? 'Tap to Start' : 'Press Space or Tap to Start';
     final TextPainter hintPainter = TextPainter(
       text: TextSpan(
-        text: 'Press Space or Tap to Start',
+        text: hintText,
         style: TextStyle(
           color: _textColor.withValues(alpha: 0.6),
           fontSize: 12,
@@ -447,6 +501,29 @@ class DinoGame {
       canvas,
       Offset(
         (size.width - hintPainter.width) / 2,
+        size.height / 2 - 10,
+      ),
+    );
+  }
+
+  void _drawPaused(Canvas canvas, Size size, {bool isMobile = false}) {
+    final String resumeText =
+        isMobile ? 'Tap to Resume' : 'Press Space or Tap to Resume';
+    final TextPainter pausePainter = TextPainter(
+      text: TextSpan(
+        text: resumeText,
+        style: TextStyle(
+          color: _textColor.withValues(alpha: 0.6),
+          fontSize: 12,
+          fontFamily: 'monospace',
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    pausePainter.paint(
+      canvas,
+      Offset(
+        (size.width - pausePainter.width) / 2,
         size.height / 2 - 10,
       ),
     );

@@ -1,81 +1,89 @@
-import 'dart:io';
-
-import 'package:audioplayers/audioplayers.dart';
-import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:flame_audio/flame_audio.dart';
 
 /// Sound effects for the Dino game using the original Chromium audio files.
 ///
-/// The original Chrome Dino game ships three Ogg Vorbis audio files
-/// (mislabeled as .mp3 in the source). We bundle the actual files as
-/// Flutter assets and copy them to a temporary directory for playback.
+/// We keep a small round-robin pool of [AudioPlayer] instances per effect,
+/// each pre-loaded with its source in [PlayerMode.lowLatency] mode.
+/// On Android this routes through the native SoundPool backend; the `.wav`
+/// (PCM) assets need no runtime decoding.
+///
+/// Pre-loading means the first play is just as fast as subsequent ones —
+/// no file I/O or native-player setup happens on the hot path.
 class GameSounds {
-  final AudioPlayer _jumpPlayer = AudioPlayer();
-  final AudioPlayer _scorePlayer = AudioPlayer();
-  final AudioPlayer _gameOverPlayer = AudioPlayer();
+  static const int _poolSize = 2;
 
-  String? _jumpPath;
-  String? _scorePath;
-  String? _gameOverPath;
+  final List<AudioPlayer> _jumpPlayers = [];
+  final List<AudioPlayer> _scorePlayers = [];
+  final List<AudioPlayer> _gameOverPlayers = [];
+
+  int _jumpIndex = 0;
+  int _scoreIndex = 0;
+  int _gameOverIndex = 0;
 
   bool _initialised = false;
 
-  /// Load audio assets from the bundle and write them to temp files.
-  /// Must be called once before playing any sounds.
+  /// Pre-cache the audio files and warm up player pools.
   Future<void> init() async {
     try {
-      final dir = await getTemporaryDirectory();
-      final soundDir = Directory('${dir.path}/dino_sounds');
-      if (!soundDir.existsSync()) {
-        soundDir.createSync(recursive: true);
-      }
+      // Copy assets to temp files so the native side can access them.
+      await FlameAudio.audioCache.loadAll([
+        'button-press.wav',
+        'score-reached.wav',
+        'hit.wav',
+      ]);
 
-      _jumpPath = await _copyAsset(
-          'assets/button-press.ogg', '${soundDir.path}/button-press.ogg');
-      _scorePath = await _copyAsset(
-          'assets/score-reached.ogg', '${soundDir.path}/score-reached.ogg');
-      _gameOverPath =
-          await _copyAsset('assets/hit.ogg', '${soundDir.path}/hit.ogg');
+      // Create pre-loaded player pools.
+      for (var i = 0; i < _poolSize; i++) {
+        _jumpPlayers.add(
+          await _createPlayer('button-press.wav'),
+        );
+        _scorePlayers.add(
+          await _createPlayer('score-reached.wav'),
+        );
+        _gameOverPlayers.add(
+          await _createPlayer('hit.wav'),
+        );
+      }
 
       _initialised = true;
     } catch (e) {
-      // Sounds will be silently disabled if asset copy fails.
+      // Sounds will be silently disabled if loading fails.
       _initialised = false;
     }
   }
 
-  Future<String> _copyAsset(String assetPath, String destPath) async {
-    final data = await rootBundle.load(assetPath);
-    final file = File(destPath);
-    await file.writeAsBytes(data.buffer.asUint8List(), flush: true);
-    return file.path;
+  Future<AudioPlayer> _createPlayer(String file) async {
+    final player = AudioPlayer()..audioCache = FlameAudio.audioCache;
+    await player.setAudioContext(
+      AudioContextConfig(focus: AudioContextConfigFocus.mixWithOthers).build(),
+    );
+    await player.setPlayerMode(PlayerMode.lowLatency);
+    await player.setSource(AssetSource(file));
+    await player.setReleaseMode(ReleaseMode.stop);
+    return player;
   }
 
   // ──────────────────────────────────────────────────────────────────────
   //  PUBLIC API
   // ──────────────────────────────────────────────────────────────────────
 
-  void playJump() {
-    if (!_initialised || _jumpPath == null) return;
-    _jumpPlayer.stop();
-    _jumpPlayer.play(DeviceFileSource(_jumpPath!));
-  }
+  void playJump() => _play(_jumpPlayers, _jumpIndex++);
 
-  void playScore() {
-    if (!_initialised || _scorePath == null) return;
-    _scorePlayer.stop();
-    _scorePlayer.play(DeviceFileSource(_scorePath!));
-  }
+  void playScore() => _play(_scorePlayers, _scoreIndex++);
 
-  void playGameOver() {
-    if (!_initialised || _gameOverPath == null) return;
-    _gameOverPlayer.stop();
-    _gameOverPlayer.play(DeviceFileSource(_gameOverPath!));
+  void playGameOver() => _play(_gameOverPlayers, _gameOverIndex++);
+
+  void _play(List<AudioPlayer> pool, int index) {
+    if (!_initialised) return;
+    final player = pool[index % _poolSize];
+    // stop resets position to the start; resume plays from there.
+    player.stop().then((_) => player.resume());
   }
 
   void dispose() {
-    _jumpPlayer.dispose();
-    _scorePlayer.dispose();
-    _gameOverPlayer.dispose();
+    for (final p in [..._jumpPlayers, ..._scorePlayers, ..._gameOverPlayers]) {
+      p.dispose();
+    }
+    FlameAudio.audioCache.clearAll();
   }
 }
