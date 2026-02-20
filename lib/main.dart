@@ -338,7 +338,7 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
                   const SizedBox(width: 12),
                   const Expanded(
                     child: Text(
-                      'Offline Dino',
+                      'Offline Dino Dart',
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,

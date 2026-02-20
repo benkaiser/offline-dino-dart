@@ -1,4 +1,4 @@
-package com.example.dino_flutter
+package com.kaiserapps.offline_dino_dart
 
 import io.flutter.embedding.android.FlutterActivity
 
